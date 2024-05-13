@@ -206,6 +206,7 @@ struct smb_irq_info {
 static const unsigned int smblite_lib_extcon_cable[] = {
 	EXTCON_USB,
 	EXTCON_USB_HOST,
+	EXTCON_CHG_USB_FAST,
 	EXTCON_NONE,
 };
 
