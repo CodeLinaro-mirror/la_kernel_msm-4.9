@@ -996,7 +996,11 @@ static int msm_hsphy_probe(struct platform_device *pdev)
 	phy->phy.set_suspend		= msm_hsphy_set_suspend;
 	phy->phy.notify_connect		= msm_hsphy_notify_connect;
 	phy->phy.notify_disconnect	= msm_hsphy_notify_disconnect;
-	phy->phy.set_power		= msm_hsphy_set_power;
+	if (of_property_read_bool(dev->of_node, "google,set-power-disable")) {
+		dev_warn(dev, "Disabling PHY set_power() callback\n");
+		phy->phy.set_power = NULL;
+	} else
+		phy->phy.set_power	= msm_hsphy_set_power;
 	phy->phy.type			= USB_PHY_TYPE_USB2;
 
 	ret = usb_add_phy_dev(&phy->phy);
