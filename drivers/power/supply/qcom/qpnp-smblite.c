@@ -148,6 +148,7 @@ struct smb_dt_props {
 	int			batt_psy_is_bms;
 	int			batt_psy_disable;
 	const char		*batt_psy_name;
+	bool			apsd_force_disabled;
 
 };
 
@@ -241,6 +242,9 @@ static ssize_t apsd_en_store(struct device *dev, struct device_attribute
 	struct smb_charger *chg = &chip->chg;
 	bool enabled;
 	int ret;
+
+	if (chip->dt.apsd_force_disabled)
+		return -ENOTSUPP;
 
 	ret = kstrtobool(buf, &enabled);
 	if (ret < 0)
@@ -465,6 +469,9 @@ static int smblite_parse_dt_misc(struct smblite *chip, struct device_node *node)
 						"google,hvdcp3-detect-en");
 	chg->hvdcp3_negotiation_en
 		= of_property_read_bool(node, "google,hvdcp3-negotiation-en");
+
+	chip->dt.apsd_force_disabled
+		= of_property_read_bool(node, "google,apsd-force-disabled");
 
 	return 0;
 }
@@ -1477,6 +1484,14 @@ static int smblite_init_hw(struct smblite *chip)
 	if (rc < 0)
 		return rc;
 
+	rc = smblite_lib_enable_apsd(chg, !chip->dt.apsd_force_disabled);
+	if (rc < 0) {
+		dev_warn(chg->dev, "Could not configure APSD, rc=%d\n",
+			rc);
+		/* Nonfatal */
+		rc = 0;
+	}
+
 	return rc;
 }
 
@@ -1489,6 +1504,10 @@ static void smblite_set_sw_voter_if_needed(struct smblite *chip)
 	int max_ua;
 	struct smb_charger *chg = &chip->chg;
 	const struct apsd_result *result = smblite_lib_get_apsd_result(chg);
+
+	/* No SW votable needed if APSD is disabled */
+	if (!smblite_lib_is_apsd_enabled(chg))
+		return;
 
 	switch (result->val) {
 	case POWER_SUPPLY_TYPE_UNKNOWN:
