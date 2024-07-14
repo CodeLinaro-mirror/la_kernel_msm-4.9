@@ -23,85 +23,6 @@ struct vote_match_data {
 
 static struct power_supply_desc usb_psy_desc;
 
-static void smblite_shim_override_icl(struct smblite_shim *shim, int type)
-{
-	struct smb_charger *chg = shim->chg;
-
-	if (type != POWER_SUPPLY_TYPE_USB)
-		return;
-
-	pr_info("Setting %s to %u\n", SW_ICL_MAX_VOTER, SDP_CURRENT_UA);
-	vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER, true, SDP_CURRENT_UA);
-
-	/* smblite-lib makes the distinction between the votes coming from
-	 * the USB phy vs general software limiting.
-	 * We'll maintain this distinction.
-	 */
-	vote(chg->usb_icl_votable, USB_PSY_VOTER, false, 0);
-}
-
-static void smblite_shim_use_real_icl(struct smblite_shim *shim, int type)
-{
-	struct smb_charger *chg = shim->chg;
-
-	if (type != POWER_SUPPLY_TYPE_USB)
-		return;
-
-	vote(chg->usb_icl_votable, USB_PSY_VOTER, true, shim->real_sdp_icl);
-	vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER, false, 0);
-}
-
-static void smblite_shim_save_real_icl(struct smblite_shim *shim, int type,
-				unsigned int icl)
-{
-	if (type != POWER_SUPPLY_TYPE_USB)
-		return;
-
-	shim->real_sdp_icl = icl;
-}
-
-static bool smblite_shim_icl_request_ignored(struct smblite_shim *shim,
-					int type)
-{
-	if (type == POWER_SUPPLY_TYPE_USB)
-		return shim->sdp_icl_req_ignored;
-
-	return false;
-}
-
-static ssize_t sdp_icl_req_ignored_store(struct device *dev,
-					struct device_attribute *attr,
-					const char *buf, size_t count)
-{
-	struct power_supply *psy = container_of(dev, struct power_supply, dev);
-	struct smblite_shim *shim = power_supply_get_drvdata(psy);
-	struct smb_charger *chg = shim->chg;
-	unsigned int new_sdp_icl_override;
-
-	sscanf(buf, "%u", &new_sdp_icl_override);
-
-	shim->sdp_icl_req_ignored = (new_sdp_icl_override != 0);
-
-	if (smblite_shim_icl_request_ignored(shim, chg->real_charger_type))
-		smblite_shim_override_icl(shim, chg->real_charger_type);
-	else
-		smblite_shim_use_real_icl(shim, chg->real_charger_type);
-
-	return count;
-}
-
-static ssize_t sdp_icl_req_ignored_show(struct device *dev,
-					struct device_attribute *attr,
-					char *buf)
-{
-	struct power_supply *psy = container_of(dev, struct power_supply, dev);
-	struct smblite_shim *shim = power_supply_get_drvdata(psy);
-
-	return scnprintf(buf, PAGE_SIZE, "%u\n", shim->sdp_icl_req_ignored);
-}
-
-static const DEVICE_ATTR_RW(sdp_icl_req_ignored);
-
 static int vote_reason_match(void *data, const char *reason, void *vote)
 {
 	struct vote_match_data *match_data = (struct vote_match_data *)data;
@@ -222,21 +143,6 @@ static int smblite_shim_usb_set_prop(struct power_supply *psy,
 	struct smb_charger *chg = shim->chg;
 	const struct power_supply_desc *real_usb_desc = chg->usb_psy->desc;
 
-	switch (psp) {
-	case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT:
-		smblite_shim_save_real_icl(shim, chg->real_charger_type,
-					val->intval);
-		if (smblite_shim_icl_request_ignored(shim,
-						chg->real_charger_type)) {
-			pr_info("Ignoring USB driver %d mA ICL request\n",
-				val->intval);
-			return 0;
-		}
-
-	default:
-		break;
-	}
-
 	return real_usb_desc->set_property(chg->usb_psy, psp, val);
 }
 
@@ -268,7 +174,6 @@ static int vote_cb_notify_psy_changed(struct gvotable_election *el,
 struct smblite_shim *smblite_shim_init(struct smb_charger *chg)
 {
 	struct smblite_shim *shim;
-	struct device_node *node = chg->dev->of_node;
 
 	shim = devm_kzalloc(chg->dev, sizeof(*shim), GFP_KERNEL);
 
@@ -277,9 +182,6 @@ struct smblite_shim *smblite_shim_init(struct smb_charger *chg)
 
 	mutex_init(&shim->lock);
 	shim->chg = chg;
-
-	shim->sdp_icl_req_ignored =
-		of_property_read_bool(node, "google,sdp-icl-req-ignored");
 
 	shim->fake_psy_online_votable =
 		gvotable_create_bool_election("SHIM_FAKE_OLN",
@@ -302,7 +204,6 @@ int smblite_shim_on_usb_psy_created(struct smblite_shim *shim,
 				struct power_supply_desc *existing_usb_desc)
 {
 	struct power_supply_config usb_cfg = {};
-	int rc;
 
 	memcpy(&usb_psy_desc, existing_usb_desc, sizeof(usb_psy_desc));
 
@@ -321,20 +222,7 @@ int smblite_shim_on_usb_psy_created(struct smblite_shim *shim,
 		return PTR_ERR(shim->psy);
 	}
 
-	rc = device_create_file(&shim->psy->dev,
-				&dev_attr_sdp_icl_req_ignored);
-	if (rc < 0) {
-		pr_err("Failed to create %s (%d)\n",
-			dev_attr_sdp_icl_req_ignored.attr.name, rc);
-		/*
-		 * Creating the file is only for convenient developer runtime
-		 * control. It's not fatal if we can't create it so ignore the
-		 * error.
-		 */
-		rc = 0;
-	}
-
-	return rc;
+	return 0;
 }
 
 void smblite_shim_on_usb_type_updated(struct smblite_shim *shim,
@@ -345,8 +233,10 @@ void smblite_shim_on_usb_type_updated(struct smblite_shim *shim,
 
 int smblite_shim_update_sw_icl_max(struct smblite_shim *shim, int type)
 {
-	if (smblite_shim_icl_request_ignored(shim, type)) {
-		smblite_shim_override_icl(shim, type);
+	if (type == POWER_SUPPLY_TYPE_USB) {
+		/* Force 500mA for USB port type */
+		vote(shim->chg->usb_icl_votable, SW_ICL_MAX_VOTER,
+		true, SDP_CURRENT_UA);
 		return 0;
 	}
 

@@ -30,8 +30,6 @@ struct smblite_shim {
 	struct power_supply *psy;
 	struct gvotable_election *fake_psy_online_votable;
 	struct gvotable_election *vmax_votable;
-	unsigned int sdp_icl_req_ignored;
-	unsigned int real_sdp_icl;
 };
 
 struct smblite_shim *smblite_shim_init(struct smb_charger *chg);
