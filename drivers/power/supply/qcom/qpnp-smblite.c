@@ -1562,6 +1562,8 @@ static int smblite_init_votables(struct smblite *chip)
 		BATT_PROFILE_VOTER, chg->batt_profile_fv_uv > 0,
 		chg->batt_profile_fv_uv);
 
+	smblite_shim_set_interim_ext_ctrl_icl_if_needed(chg->shim);
+
 	smblite_set_sw_voter_if_needed(chip);
 
 	/* Some h/w limit maximum supported ICL */

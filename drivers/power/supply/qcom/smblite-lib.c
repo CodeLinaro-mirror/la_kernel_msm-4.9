@@ -605,7 +605,8 @@ static void smblite_lib_uusb_removal(struct smb_charger *chg)
 	/* reset both usbin current and voltage votes */
 	vote(chg->pl_enable_votable_indirect, USBIN_I_VOTER, false, 0);
 	vote(chg->pl_enable_votable_indirect, USBIN_V_VOTER, false, 0);
-	vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER, true,
+	vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER,
+			!smblite_shim_is_icl_ext_ctrl_active(chg->shim),
 			is_flashlite_active(chg) ? USBIN_500UA : USBIN_100UA);
 	vote(chg->usb_icl_votable, FLASH_ACTIVE_VOTER, false, 0);
 	vote_override(chg->fcc_main_votable, FCC_STEPPER_VOTER,
@@ -3293,8 +3294,16 @@ static void smblite_lib_usb_plugin_locked(struct smb_charger *chg)
 				smblite_lib_is_boost_en(chg) ? "True" : "False");
 		if (!smblite_lib_is_apsd_enabled(chg)) {
 			vote(chg->usb_icl_votable, USB_PSY_VOTER, false, 0);
-			/* Default to 500mA SDP if APSD is disabled */
-			vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER, true, SDP_CURRENT_UA);
+
+			/*
+			 * Typically, APSD will be disabled if we expect ICL
+			 * to be set via a external control. However, in the
+			 * case external control is disabled, set a default
+			 * of 500mA
+			 */
+			vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER,
+				!smblite_shim_is_icl_ext_ctrl_active(chg->shim),
+				SDP_CURRENT_UA);
 		}
 	} else {
 		smblite_lib_update_usb_type(chg, POWER_SUPPLY_TYPE_UNKNOWN);

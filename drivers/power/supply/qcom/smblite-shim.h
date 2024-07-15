@@ -11,6 +11,25 @@
 #include "misc/gvotable.h"
 #include "smblite-lib.h"
 
+/*
+ * Voter used when an external POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT request
+ * comes in via power_supply_set_property().
+ * See smblite_shim_usb_set_prop().
+ */
+#define EXTERNAL_CONTROL_VOTER "EXTERNAL_CONTROL_VOTER"
+
+/*
+ * Voter used during smblite probe to set a temporary ICL.
+ * If we expect an external controller to change the ICL, the controller will
+ * initialize after smblite since it operates on the power supply that smblite
+ * provides.
+ * In this case, it may be necessary to have a temporary ICL until the external
+ * controller is ready.
+ * Also see smblite_shim_set_interim_ext_ctrl_icl_if_needed() and
+ * smblite_shim_usb_set_prop().
+ */
+#define EXTERNAL_CONTROL_INTERIM_VOTER "EXTERNAL_CONTROL_INTERIM_VOTER"
+
 enum smblite_shim_plug_sts {
 	SMBLITE_SHIM_UNPLUGGED,
 	SMBLITE_SHIM_PLUGGED_IN
@@ -41,6 +60,8 @@ void smblite_shim_on_usb_type_updated(struct smblite_shim *shim,
 				enum power_supply_type type);
 
 int smblite_shim_update_sw_icl_max(struct smblite_shim *shim, int type);
+bool smblite_shim_is_icl_ext_ctrl_active(struct smblite_shim *shim);
+void smblite_shim_set_interim_ext_ctrl_icl_if_needed(struct smblite_shim *shim);
 
 void smblite_shim_notify_hvdcp_req(struct smblite_shim *shim);
 void smblite_shim_notify_plugin(struct smblite_shim *shim,

@@ -143,6 +143,18 @@ static int smblite_shim_usb_set_prop(struct power_supply *psy,
 	struct smb_charger *chg = shim->chg;
 	const struct power_supply_desc *real_usb_desc = chg->usb_psy->desc;
 
+	switch (psp) {
+	case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT:
+		vote(chg->usb_icl_votable, EXTERNAL_CONTROL_VOTER, true,
+		val->intval);
+		vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER, false, 0);
+		vote(chg->usb_icl_votable, EXTERNAL_CONTROL_INTERIM_VOTER,
+			false, 0);
+		return 0;
+	default:
+		break;
+	}
+
 	return real_usb_desc->set_property(chg->usb_psy, psp, val);
 }
 
@@ -233,6 +245,12 @@ void smblite_shim_on_usb_type_updated(struct smblite_shim *shim,
 
 int smblite_shim_update_sw_icl_max(struct smblite_shim *shim, int type)
 {
+	if (smblite_shim_is_icl_ext_ctrl_active(shim)) {
+		/* Disable SW_ICL_MAX_VOTER since it gets re-set on unplug */
+		vote(shim->chg->usb_icl_votable, SW_ICL_MAX_VOTER, false, 0);
+		return 0;
+	}
+
 	if (type == POWER_SUPPLY_TYPE_USB) {
 		/* Force 500mA for USB port type */
 		vote(shim->chg->usb_icl_votable, SW_ICL_MAX_VOTER,
@@ -241,6 +259,24 @@ int smblite_shim_update_sw_icl_max(struct smblite_shim *shim, int type)
 	}
 
 	return -ENOSYS;
+}
+
+bool smblite_shim_is_icl_ext_ctrl_active(struct smblite_shim *shim)
+{
+	return is_client_vote_enabled(shim->chg->usb_icl_votable,
+				EXTERNAL_CONTROL_VOTER);
+}
+
+void smblite_shim_set_interim_ext_ctrl_icl_if_needed(struct smblite_shim *shim)
+{
+	int ret;
+	u32 interim_icl;
+
+	ret = of_property_read_u32(shim->chg->dev->of_node,
+				"google,ext-ctl-interim-icl-ua", &interim_icl);
+
+	vote(shim->chg->usb_icl_votable, EXTERNAL_CONTROL_INTERIM_VOTER,
+		!ret, interim_icl);
 }
 
 void smblite_shim_notify_hvdcp_req(struct smblite_shim *shim)
