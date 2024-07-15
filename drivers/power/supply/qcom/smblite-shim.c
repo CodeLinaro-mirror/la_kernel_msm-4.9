@@ -9,6 +9,7 @@
 #include <linux/pmic-voter.h>
 #include <linux/power_supply.h>
 #include <linux/workqueue.h>
+#include "smblite-shim-plug-debounce.h"
 #include "smblite-shim.h"
 
 struct icl_check_data {
@@ -201,6 +202,8 @@ void smblite_shim_deinit(struct smb_charger *chg)
 {
 	struct smblite_shim *shim = chg->shim;
 
+	smblite_shim_plug_debounce_deinit(shim);
+
 	gvotable_destroy_election(shim->vmax_votable);
 	gvotable_destroy_election(shim->fake_psy_online_votable);
 	gvotable_destroy_election(shim->fake_psy_present_votable);
@@ -262,6 +265,8 @@ int smblite_shim_on_usb_psy_created(struct smblite_shim *shim,
 		pr_err("Couldn't register smblite shim USB power supply\n");
 		return PTR_ERR(shim->psy);
 	}
+
+	shim->debounce = smblite_shim_plug_debounce_init(shim);
 
 	return 0;
 }

@@ -30,6 +30,8 @@
  */
 #define EXTERNAL_CONTROL_INTERIM_VOTER "EXTERNAL_CONTROL_INTERIM_VOTER"
 
+struct smblite_shim_plug_debounce;
+
 enum smblite_shim_plug_sts {
 	SMBLITE_SHIM_UNPLUGGED,
 	SMBLITE_SHIM_PLUGGED_IN
@@ -50,6 +52,7 @@ struct smblite_shim {
 	struct gvotable_election *fake_psy_present_votable;
 	struct gvotable_election *fake_psy_online_votable;
 	struct gvotable_election *vmax_votable;
+	struct smblite_shim_plug_debounce *debounce;
 };
 
 struct smblite_shim *smblite_shim_init(struct smb_charger *chg);
