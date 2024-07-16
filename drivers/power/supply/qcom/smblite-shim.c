@@ -183,6 +183,15 @@ static int vote_cb_notify_psy_changed(struct gvotable_election *el,
 	return 0;
 }
 
+void smblite_shim_deinit(struct smb_charger *chg)
+{
+	struct smblite_shim *shim = chg->shim;
+
+	gvotable_destroy_election(shim->vmax_votable);
+	gvotable_destroy_election(shim->fake_psy_online_votable);
+	mutex_destroy(&shim->lock);
+}
+
 struct smblite_shim *smblite_shim_init(struct smb_charger *chg)
 {
 	struct smblite_shim *shim;

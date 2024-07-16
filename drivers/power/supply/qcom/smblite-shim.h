@@ -52,6 +52,7 @@ struct smblite_shim {
 };
 
 struct smblite_shim *smblite_shim_init(struct smb_charger *chg);
+void smblite_shim_deinit(struct smb_charger *chg);
 
 int smblite_shim_on_usb_psy_created(struct smblite_shim *shim,
 				struct power_supply_desc *existing_usb_desc);

@@ -2486,6 +2486,7 @@ static int smblite_remove(struct platform_device *pdev)
 
 	smblite_disable_interrupts(chg);
 	class_destroy(&chg->qcom_class);
+	smblite_shim_deinit(chg);
 	smblite_lib_deinit(chg);
 	sysfs_remove_groups(&chg->dev->kobj, smblite_groups);
 	platform_set_drvdata(pdev, NULL);
