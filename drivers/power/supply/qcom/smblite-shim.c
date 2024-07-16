@@ -78,6 +78,10 @@ static int get_real_icl(struct smblite_shim *shim)
 	ret = real_usb_desc->get_property(chg->usb_psy,
 					POWER_SUPPLY_PROP_PRESENT, &present);
 
+	if (gvotable_get_current_int_vote(shim->fake_psy_present_votable)) {
+		present.intval = true;
+	}
+
 	if ((ret != 0) || !present.intval || !icl_votable) {
 		return 0;
 	}
@@ -96,15 +100,25 @@ static int smblite_shim_usb_get_prop(struct power_supply *psy,
 	struct smb_charger *chg = shim->chg;
 	const struct power_supply_desc *real_usb_desc = chg->usb_psy->desc;
 	bool online_vote;
+	bool present_vote;
 	int real_icl;
 
 	online_vote =
 		gvotable_get_current_int_vote(shim->fake_psy_online_votable);
 
+	present_vote =
+		gvotable_get_current_int_vote(shim->fake_psy_present_votable);
+
 	if (online_vote)
 		real_icl = get_real_icl(shim);
 
 	switch (psp) {
+	case POWER_SUPPLY_PROP_PRESENT:
+		if (present_vote) {
+			val->intval = true;
+			return 0;
+		}
+		break;
 	case POWER_SUPPLY_PROP_ONLINE:
 		/* We'll actually only fake the online property if there was no
 		 * real reason for the ICL to be 0. If a real vote reason set
@@ -189,6 +203,7 @@ void smblite_shim_deinit(struct smb_charger *chg)
 
 	gvotable_destroy_election(shim->vmax_votable);
 	gvotable_destroy_election(shim->fake_psy_online_votable);
+	gvotable_destroy_election(shim->fake_psy_present_votable);
 	mutex_destroy(&shim->lock);
 }
 
@@ -203,6 +218,11 @@ struct smblite_shim *smblite_shim_init(struct smb_charger *chg)
 
 	mutex_init(&shim->lock);
 	shim->chg = chg;
+
+	shim->fake_psy_present_votable =
+		gvotable_create_bool_election("SHIM_FAKE_PRES",
+					vote_cb_notify_psy_changed,
+					shim);
 
 	shim->fake_psy_online_votable =
 		gvotable_create_bool_election("SHIM_FAKE_OLN",

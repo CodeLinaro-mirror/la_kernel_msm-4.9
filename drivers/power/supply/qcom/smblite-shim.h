@@ -47,6 +47,7 @@ struct smblite_shim {
 	struct blocking_notifier_head boost_nh;
 	struct smb_charger *chg;
 	struct power_supply *psy;
+	struct gvotable_election *fake_psy_present_votable;
 	struct gvotable_election *fake_psy_online_votable;
 	struct gvotable_election *vmax_votable;
 };
