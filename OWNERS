@@ -1,5 +1,4 @@
 file:/OWNERS_core
 per-file modules*monaco=set noparent
-per-file modules*monaco=file:/OWNERS_pixelwatchbsp
-per-file monaco.bzl=file:/OWNERS_pixelwatchbsp
-
+per-file modules*monaco=file:kernel/private/google-modules/soc/msm:OWNERS
+per-file monaco.bzl=file:kernel/private/google-modules/soc/msm:OWNERS
