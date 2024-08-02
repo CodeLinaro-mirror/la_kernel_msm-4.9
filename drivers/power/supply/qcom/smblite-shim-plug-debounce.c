@@ -55,6 +55,8 @@ static const DEVICE_ATTR_RW(unplug_debounce_ms);
 static void vote_psy_fake_plugged(struct smblite_shim_plug_debounce *debounce,
 				bool plugged)
 {
+	pr_debug("Fake plugged status: %u\n", plugged);
+
 	gvotable_cast_bool_vote(debounce->fake_psy_present_votable,
 				PLUG_DEBOUNCE_VOTER, plugged);
 	gvotable_cast_bool_vote(debounce->fake_psy_online_votable,
