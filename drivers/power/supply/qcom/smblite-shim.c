@@ -198,9 +198,71 @@ static int vote_cb_notify_psy_changed(struct gvotable_election *el,
 	return 0;
 }
 
+static int vote_cb_fake_present_changed(struct gvotable_election *el,
+					const char *reason,
+					void *vote)
+{
+	struct smblite_shim *shim =
+		(struct smblite_shim *)gvotable_get_data(el);
+	schedule_work(&shim->extcon_update.update_work);
+	power_supply_changed(shim->psy);
+	return 0;
+}
+
+static void extcon_update_work(struct work_struct *work)
+{
+	struct smblite_shim_extcon_update *extcon_update
+		= container_of(work, struct smblite_shim_extcon_update,
+				update_work);
+	struct smblite_shim *shim
+		= container_of(extcon_update, struct smblite_shim,
+				extcon_update);
+
+	union power_supply_propval present;
+	bool fake_present;
+	bool new_state;
+	int ret;
+
+	if (!extcon_update->send_updates)
+		return;
+
+	ret = power_supply_get_property(shim->chg->usb_psy,
+					POWER_SUPPLY_PROP_PRESENT, &present);
+	if (ret < 0) {
+		present.intval = false;
+		pr_err("Could not get real USB present status: %d\n", ret);
+	}
+
+	ret = gvotable_get_current_int_vote(shim->fake_psy_present_votable);
+	if (ret < 0) {
+		pr_err("Could not get fake present vote: %d\n", ret);
+		fake_present = false;
+	} else
+		fake_present = ret;
+
+	pr_debug("USB Present: real: %u, faked: %u\n", present.intval,
+		fake_present);
+
+	new_state = present.intval || fake_present;
+
+	if (new_state != extcon_update->last_state) {
+		pr_debug("State changed, updating extcon\n");
+		ret = extcon_set_state_sync(shim->chg->extcon,
+					EXTCON_CHG_USB_FAST,
+					new_state);
+		if (ret == 0)
+			extcon_update->last_state = new_state;
+		else
+			pr_err("Couldn't update extcon state: %d\n", ret);
+	}
+}
+
 void smblite_shim_deinit(struct smb_charger *chg)
 {
 	struct smblite_shim *shim = chg->shim;
+
+	shim->extcon_update.send_updates = false;
+	cancel_work_sync(&shim->extcon_update.update_work);
 
 	smblite_shim_plug_debounce_deinit(shim);
 
@@ -224,7 +286,7 @@ struct smblite_shim *smblite_shim_init(struct smb_charger *chg)
 
 	shim->fake_psy_present_votable =
 		gvotable_create_bool_election("SHIM_FAKE_PRES",
-					vote_cb_notify_psy_changed,
+					vote_cb_fake_present_changed,
 					shim);
 
 	shim->fake_psy_online_votable =
@@ -240,6 +302,9 @@ struct smblite_shim *smblite_shim_init(struct smb_charger *chg)
 	BLOCKING_INIT_NOTIFIER_HEAD(&shim->hvdcp_req_nh);
 	BLOCKING_INIT_NOTIFIER_HEAD(&shim->usbin_plugin_nh);
 	BLOCKING_INIT_NOTIFIER_HEAD(&shim->boost_nh);
+
+	INIT_WORK(&shim->extcon_update.update_work, extcon_update_work);
+	shim->extcon_update.send_updates = true;
 
 	return shim;
 }
@@ -321,6 +386,7 @@ void smblite_shim_notify_hvdcp_req(struct smblite_shim *shim)
 void smblite_shim_notify_plugin(struct smblite_shim *shim,
 				enum smblite_shim_plug_sts plugged)
 {
+	schedule_work(&shim->extcon_update.update_work);
 	blocking_notifier_call_chain(&shim->usbin_plugin_nh, plugged, shim);
 }
 

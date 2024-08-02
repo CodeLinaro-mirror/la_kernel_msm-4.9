@@ -8,6 +8,7 @@
 #include <linux/notifier.h>
 #include <linux/pmic-voter.h>
 #include <linux/power_supply.h>
+#include <linux/workqueue.h>
 #include "misc/gvotable.h"
 #include "smblite-lib.h"
 
@@ -42,6 +43,12 @@ enum smblite_shim_boost_sts {
 	SMBLITE_SHIM_BOOST_EN
 };
 
+struct smblite_shim_extcon_update {
+	struct work_struct update_work;
+	bool last_state;
+	bool send_updates;
+};
+
 struct smblite_shim {
 	struct mutex lock;
 	struct blocking_notifier_head hvdcp_req_nh;
@@ -53,6 +60,7 @@ struct smblite_shim {
 	struct gvotable_election *fake_psy_online_votable;
 	struct gvotable_election *vmax_votable;
 	struct smblite_shim_plug_debounce *debounce;
+	struct smblite_shim_extcon_update extcon_update;
 };
 
 struct smblite_shim *smblite_shim_init(struct smb_charger *chg);
