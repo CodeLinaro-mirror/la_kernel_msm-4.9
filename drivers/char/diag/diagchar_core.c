@@ -63,6 +63,9 @@ struct diagchar_priv {
 #define USER_SPACE_RAW_DATA	0
 #define USER_SPACE_HDLC_DATA	1
 
+/* limit one time cmd registration list size to 16KB */
+#define MAX_CMD_REGISTER_SIZE	(16 * 1024)
+
 /* Memory pool variables */
 /* Used for copying any incoming packet from user space clients. */
 static unsigned int poolsize = 12;
@@ -745,9 +748,13 @@ int diag_cmd_add_reg(struct diag_cmd_reg_entry_t *new_entry, uint8_t proc,
 	if (proc != APPS_DATA)
 		pid = INVALID_PID;
 
+	mutex_lock(&driver->cmd_reg_mutex);
+
 	new_item = kzalloc(sizeof(struct diag_cmd_reg_t), GFP_KERNEL);
-	if (!new_item)
+	if (!new_item) {
+		mutex_unlock(&driver->cmd_reg_mutex);
 		return -ENOMEM;
+	}
 	kmemleak_not_leak(new_item);
 
 	new_item->pid = pid;
@@ -756,7 +763,6 @@ int diag_cmd_add_reg(struct diag_cmd_reg_entry_t *new_entry, uint8_t proc,
 	       sizeof(struct diag_cmd_reg_entry_t));
 	INIT_LIST_HEAD(&new_item->link);
 
-	mutex_lock(&driver->cmd_reg_mutex);
 	list_add_tail(&new_item->link, &driver->cmd_reg_list);
 	driver->cmd_reg_count++;
 	diag_cmd_invalidate_polling(DIAG_CMD_ADD);
@@ -2555,8 +2561,8 @@ static int diag_cmd_register_tbl(struct diag_cmd_reg_tbl_t *reg_tbl)
 	}
 
 	count = reg_tbl->count;
-	if ((UINT_MAX / entry_len) < count) {
-		pr_warn("diag: In %s, possbile integer overflow.\n", __func__);
+	if ((MAX_CMD_REGISTER_SIZE / entry_len) < count) {
+		pr_warn("diag: In %s, un-supported cmd registration size\n", __func__);
 		return -EFAULT;
 	}
 
