@@ -4,8 +4,6 @@
  * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
-#define pr_fmt(fmt) KBUILD_MODNAME ": %s: " fmt, __func__
-
 #include <linux/debugfs.h>
 #include <linux/delay.h>
 #include <linux/device.h>
@@ -23,7 +21,6 @@
 #include <linux/suspend.h>
 #include <linux/usb/typec.h>
 #include <linux/nvmem-consumer.h>
-#include "smblite-shim.h"
 #include "smblite-reg.h"
 #include "smblite-lib.h"
 #include "smb5-iio.h"
@@ -145,11 +142,6 @@ struct smb_dt_props {
 	int			disable_suspend_on_collapse;
 	bool			remote_fg;
 	enum float_options	float_option;
-	int			batt_psy_is_bms;
-	int			batt_psy_disable;
-	const char		*batt_psy_name;
-	bool			apsd_force_disabled;
-
 };
 
 struct smblite {
@@ -159,43 +151,6 @@ struct smblite {
 	unsigned int		nchannels;
 	struct iio_channel	*iio_chans;
 	struct iio_chan_spec	*iio_chan_ids;
-};
-
-struct probe_logged_reg {
-	const char *name;
-	u16 addr;
-};
-
-/* Registers here should use datasheet naming and full address */
-static const struct probe_logged_reg pm5100_probe_logged_regs[] = {
-	{
-		.name = "SCHG_W_USB_APSD_RESULT_STATUS",
-		.addr = 0x0000290B,
-	},
-	{
-		.name = "SCHG_W_USB_USB_ICL_OPTIONS",
-		.addr = 0x00002950,
-	},
-	{
-		.name = "SCHG_W_USB_USB_ICL_OVERRIDE",
-		.addr = 0x00002951,
-	},
-	{
-		.name = "SCHG_W_USB_USB_ICL_CFG",
-		.addr = 0x00002952,
-	},
-	{
-		.name = "SCHG_W_DCDC_ICL_MAX_STATUS",
-		.addr = 0x00002706,
-	},
-	{
-		.name = "SCHG_W_DCDC_ICL_STATUS",
-		.addr = 0x00002709,
-	},
-	{
-		.name = "SCHG_W_DCDC_POWER_PATH_STATUS",
-		.addr = 0x0000270B,
-	}
 };
 
 static int __debug_mask;
@@ -225,62 +180,11 @@ static ssize_t weak_chg_icl_ua_store(struct device *dev, struct device_attribute
 }
 static DEVICE_ATTR_RW(weak_chg_icl_ua);
 
-static ssize_t apsd_en_show(struct device *dev, struct device_attribute
-				*attr, char *buf)
-{
-	struct smblite *chip = dev_get_drvdata(dev);
-	struct smb_charger *chg = &chip->chg;
-
-	return scnprintf(buf, PAGE_SIZE, "%d\n",
-			smblite_lib_is_apsd_enabled(chg));
-}
-
-static ssize_t apsd_en_store(struct device *dev, struct device_attribute
-			*attr, const char *buf, size_t count)
-{
-	struct smblite *chip = dev_get_drvdata(dev);
-	struct smb_charger *chg = &chip->chg;
-	bool enabled;
-	int ret;
-
-	if (chip->dt.apsd_force_disabled)
-		return -ENOTSUPP;
-
-	ret = kstrtobool(buf, &enabled);
-	if (ret < 0)
-		return ret;
-
-	ret = smblite_lib_enable_apsd(chg, enabled);
-	return (ret == 0) ? count : ret;
-}
-static DEVICE_ATTR_RW(apsd_en);
-
 static struct attribute *smblite_attrs[] = {
 	&dev_attr_weak_chg_icl_ua.attr,
-	&dev_attr_apsd_en.attr,
 	NULL,
 };
 ATTRIBUTE_GROUPS(smblite);
-
-static void log_registers(struct smb_charger *chg,
-			const struct probe_logged_reg *regs, size_t num_regs)
-{
-	int i;
-	for (i = 0; i < num_regs; i++) {
-		u8 val;
-		int ret;
-		const struct probe_logged_reg *reg = &regs[i];
-
-		ret = smblite_lib_read(chg, reg->addr, &val);
-		if (ret != 0) {
-			pr_err("Could not read register %s (0x%x): %d\n",
-				reg->name, reg->addr, ret);
-			continue;
-		}
-
-		pr_info("%s (0x%x): 0x%x\n", reg->name, reg->addr, val);
-	}
-}
 
 #define REVISION_V2	0x2
 static int smblite_chg_config_init(struct smblite *chip)
@@ -391,7 +295,7 @@ static int smblite_parse_dt_misc(struct smblite *chip, struct device_node *node)
 	chip->dt.auto_recharge_soc = -EINVAL;
 	rc = of_property_read_u32(node, "qcom,auto-recharge-soc",
 				&chip->dt.auto_recharge_soc);
-	if ((rc >= 0) && (chip->dt.auto_recharge_soc < 0 ||
+	if ((rc < 0) || (chip->dt.auto_recharge_soc < 0 ||
 			chip->dt.auto_recharge_soc > 100)) {
 		pr_err("qcom,auto-recharge-soc is incorrect\n");
 		return -EINVAL;
@@ -438,13 +342,6 @@ static int smblite_parse_dt_misc(struct smblite *chip, struct device_node *node)
 		pr_err("qcom,float-option is out of range [0, 4]\n");
 		return -EINVAL;
 	}
-	chip->dt.batt_psy_is_bms = of_property_read_bool(node,
-					"google,batt_psy_is_bms");
-	chip->dt.batt_psy_disable = of_property_read_bool(node,
-					"google,batt_psy_disable");
-
-	(void)of_property_read_string(node, "google,batt_psy_name",
-				      &chip->dt.batt_psy_name);
 
 	if (of_find_property(node, "nvmem-cells", NULL)) {
 		chg->debug_mask_nvmem = devm_nvmem_cell_get(chg->dev, "charger_debug_mask");
@@ -464,14 +361,6 @@ static int smblite_parse_dt_misc(struct smblite *chip, struct device_node *node)
 			return rc;
 		}
 	}
-
-	chg->hvdcp3_detect_en = of_property_read_bool(node,
-						"google,hvdcp3-detect-en");
-	chg->hvdcp3_negotiation_en
-		= of_property_read_bool(node, "google,hvdcp3-negotiation-en");
-
-	chip->dt.apsd_force_disabled
-		= of_property_read_bool(node, "google,apsd-force-disabled");
 
 	return 0;
 }
@@ -507,11 +396,6 @@ static int smblite_parse_dt_adc_channels(struct smb_charger *chg)
 
 	rc = smblite_lib_get_iio_channel(chg, "chg_temp",
 					&chg->iio.temp_chan);
-	if (rc < 0)
-		return rc;
-
-	rc = smblite_lib_get_iio_channel(chg, "usb_in_current",
-					&chg->iio.usbin_i_chan);
 	if (rc < 0)
 		return rc;
 
@@ -626,8 +510,6 @@ static enum power_supply_property smblite_usb_props[] = {
 	POWER_SUPPLY_PROP_CURRENT_MAX,
 	POWER_SUPPLY_PROP_VOLTAGE_MAX,
 	POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,
-	POWER_SUPPLY_PROP_USB_TYPE,
-	POWER_SUPPLY_PROP_CURRENT_NOW,
 };
 
 static enum power_supply_usb_type smblite_usb_psy_supported_types[] = {
@@ -671,12 +553,6 @@ static int smblite_usb_get_prop(struct power_supply *psy,
 		/* USB uses this to set SDP current */
 		rc = smblite_lib_get_charge_current(chg, &val->intval);
 		break;
-	case POWER_SUPPLY_PROP_USB_TYPE:
-		smblite_lib_get_prop_usb_type(chg, val);
-		break;
-	case POWER_SUPPLY_PROP_CURRENT_NOW:
-		rc = smblite_lib_get_prop_usbin_current(chg, val);
-		break;
 	default:
 		pr_err("get prop %d is not supported in usb\n", psp);
 		rc = -EINVAL;
@@ -703,8 +579,6 @@ void smblite_update_usb_desc(struct smb_charger *chg)
 		usb_psy_desc.type = POWER_SUPPLY_TYPE_USB;
 		break;
 	}
-
-	smblite_shim_on_usb_type_updated(chg->shim, usb_psy_desc.type);
 }
 
 #define MIN_THERMAL_VOTE_UA	500000
@@ -742,13 +616,8 @@ static int smblite_usb_prop_is_writeable(struct power_supply *psy,
 	return 0;
 }
 
-/* Notifies usb shim psy of qcom_usb power_supply_changed() events */
-static char *usb_psy_supplied_to[] = {
-	"usb",
-};
-
 static struct power_supply_desc usb_psy_desc = {
-	.name = "qcom_usb",
+	.name = "usb",
 	.type = POWER_SUPPLY_TYPE_USB,
 	.properties = smblite_usb_props,
 	.num_properties = ARRAY_SIZE(smblite_usb_props),
@@ -766,8 +635,6 @@ static int smblite_init_usb_psy(struct smblite *chip)
 
 	usb_cfg.drv_data = chip;
 	usb_cfg.of_node = chg->dev->of_node;
-	usb_cfg.supplied_to = usb_psy_supplied_to;
-	usb_cfg.num_supplicants = ARRAY_SIZE(usb_psy_supplied_to);
 	chg->usb_psy = devm_power_supply_register(chg->dev,
 						  &usb_psy_desc,
 						  &usb_cfg);
@@ -776,7 +643,7 @@ static int smblite_init_usb_psy(struct smblite *chip)
 		return PTR_ERR(chg->usb_psy);
 	}
 
-	return smblite_shim_on_usb_psy_created(chg->shim, &usb_psy_desc);
+	return 0;
 }
 
 /*************************
@@ -965,7 +832,7 @@ static int smblite_batt_prop_is_writeable(struct power_supply *psy,
 	return rc;
 }
 
-static struct power_supply_desc batt_psy_desc = {
+static const struct power_supply_desc batt_psy_desc = {
 	.name = "battery",
 	.type = POWER_SUPPLY_TYPE_BATTERY,
 	.properties = smblite_batt_props,
@@ -981,20 +848,8 @@ static int smblite_init_batt_psy(struct smblite *chip)
 	struct smb_charger *chg = &chip->chg;
 	int rc = 0;
 
-	if (chip->dt.batt_psy_disable) {
-		pr_warn("Requested disable of battery power supply\n");
-		return 0;
-	}
-
 	batt_cfg.drv_data = chg;
 	batt_cfg.of_node = chg->dev->of_node;
-
-	if (chip->dt.batt_psy_is_bms)
-		batt_psy_desc.type = POWER_SUPPLY_TYPE_UNKNOWN;
-	if (chip->dt.batt_psy_name)
-		batt_psy_desc.name = chip->dt.batt_psy_name;
-
-
 	chg->batt_psy = devm_power_supply_register(chg->dev,
 					   &batt_psy_desc,
 					   &batt_cfg);
@@ -1348,11 +1203,9 @@ static int smblite_init_hw(struct smblite *chip)
 		return rc;
 	}
 
-	/* HVDCP detection only for PM5100 targets based on value of hvdcp3
-	 * detection enable status
-	*/
+	/* Enable HVDCP detection only for PM5100 targets */
 	if (chg->subtype == PM5100)
-		smblite_lib_hvdcp_detect_enable(chg, chg->hvdcp3_detect_en);
+		smblite_lib_hvdcp_detect_enable(chg, true);
 
 	rc = schgm_flashlite_init(chg);
 	if (rc < 0) {
@@ -1484,55 +1337,7 @@ static int smblite_init_hw(struct smblite *chip)
 	if (rc < 0)
 		return rc;
 
-	rc = smblite_lib_enable_apsd(chg, !chip->dt.apsd_force_disabled);
-	if (rc < 0) {
-		dev_warn(chg->dev, "Could not configure APSD, rc=%d\n",
-			rc);
-		/* Nonfatal */
-		rc = 0;
-	}
-
 	return rc;
-}
-
-/*
- * If HW limit is higher than what the current port supports,
- * set SW_ICL_MAX_VOTER first.
- */
-static void smblite_set_sw_voter_if_needed(struct smblite *chip)
-{
-	int max_ua;
-	struct smb_charger *chg = &chip->chg;
-	const struct apsd_result *result = smblite_lib_get_apsd_result(chg);
-
-	/* No SW votable needed if APSD is disabled */
-	if (!smblite_lib_is_apsd_enabled(chg))
-		return;
-
-	switch (result->val) {
-	case POWER_SUPPLY_TYPE_UNKNOWN:
-		max_ua = USBIN_100UA;
-		break;
-	case POWER_SUPPLY_TYPE_USB:
-		max_ua = SDP_CURRENT_UA;
-		break;
-	case QTI_POWER_SUPPLY_TYPE_USB_FLOAT:
-		if (chip->dt.float_option == FLOAT_SDP) {
-			max_ua = SDP_CURRENT_UA;
-			break;
-		}
-	default:
-		max_ua = DCP_CURRENT_UA;
-	}
-
-	if ((chip->dt.usb_icl_ua <= 0) || (max_ua < chip->dt.usb_icl_ua)) {
-		int rc = vote(chip->chg.usb_icl_votable, SW_ICL_MAX_VOTER,
-				true, max_ua);
-		if (rc < 0)
-			dev_err(chg->dev, "Couldn't cap ICL to port rc=%d\n",
-				rc);
-	}
-
 }
 
 static int smblite_init_votables(struct smblite *chip)
@@ -1561,10 +1366,6 @@ static int smblite_init_votables(struct smblite *chip)
 	vote(chg->fv_votable,
 		BATT_PROFILE_VOTER, chg->batt_profile_fv_uv > 0,
 		chg->batt_profile_fv_uv);
-
-	smblite_shim_set_interim_ext_ctrl_icl_if_needed(chg->shim);
-
-	smblite_set_sw_voter_if_needed(chip);
 
 	/* Some h/w limit maximum supported ICL */
 	vote(chg->usb_icl_votable, HW_LIMIT_VOTER,
@@ -1778,7 +1579,6 @@ static struct smb_irq_info smblite_irqs[] = {
 	},
 	[AICL_FAIL_IRQ] = {
 		.name		= "aicl-fail",
-		.handler	= smblite_aicl_fail_irq_handler,
 	},
 	[AICL_DONE_IRQ] = {
 		.name		= "aicl-done",
@@ -1902,11 +1702,9 @@ static int smblite_request_interrupts(struct smblite *chip)
 	for_each_available_child_of_node(node, child) {
 		of_property_for_each_string(child, "interrupt-names",
 					    prop, name) {
-			if (name != NULL && *name != 0) {
-				rc = smblite_request_interrupt(chip, child, name);
-				if (rc < 0)
-					return rc;
-			}
+			rc = smblite_request_interrupt(chip, child, name);
+			if (rc < 0)
+				return rc;
 		}
 	}
 
@@ -2348,10 +2146,6 @@ static int smblite_probe(struct platform_device *pdev)
 		return rc;
 	}
 
-	if (chg->subtype == PM5100)
-		log_registers(chg, pm5100_probe_logged_regs,
-			ARRAY_SIZE(pm5100_probe_logged_regs));
-
 	rc = smblite_parse_dt(chip);
 	if (rc < 0) {
 		pr_err("Couldn't parse device tree rc=%d\n", rc);
@@ -2371,12 +2165,6 @@ static int smblite_probe(struct platform_device *pdev)
 	if (rc < 0) {
 		pr_err("Smblib_init failed rc=%d\n", rc);
 		return rc;
-	}
-
-	chg->shim = smblite_shim_init(chg);
-	if (!chg->shim) {
-		pr_err("Could not initialize smblite_shim");
-		goto cleanup;
 	}
 
 	rc = smblite_extcon_init(chg);
@@ -2486,7 +2274,6 @@ static int smblite_remove(struct platform_device *pdev)
 
 	smblite_disable_interrupts(chg);
 	class_destroy(&chg->qcom_class);
-	smblite_shim_deinit(chg);
 	smblite_lib_deinit(chg);
 	sysfs_remove_groups(&chg->dev->kobj, smblite_groups);
 	platform_set_drvdata(pdev, NULL);

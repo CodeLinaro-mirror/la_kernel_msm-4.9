@@ -18,13 +18,11 @@
 #include <linux/extcon-provider.h>
 #include <linux/usb/typec.h>
 #include <linux/qti_power_supply.h>
-#include "smblite-shim.h"
 #include "storm-watch.h"
 #include "battery.h"
 #include "smblite-remote-bms.h"
 
 enum print_reason {
-	PR_ALWAYS	= 0,
 	PR_INTERRUPT	= BIT(0),
 	PR_REGISTER	= BIT(1),
 	PR_MISC		= BIT(2),
@@ -206,7 +204,6 @@ struct smb_irq_info {
 static const unsigned int smblite_lib_extcon_cable[] = {
 	EXTCON_USB,
 	EXTCON_USB_HOST,
-	EXTCON_CHG_USB_FAST,
 	EXTCON_NONE,
 };
 
@@ -257,7 +254,6 @@ struct parallel_params {
 struct smb_iio {
 	struct iio_channel	*temp_chan;
 	struct iio_channel	*usbin_v_chan;
-	struct iio_channel	*usbin_i_chan;
 };
 
 enum pmic_type {
@@ -294,7 +290,6 @@ struct smb_charger {
 	enum smb_mode		mode;
 	u8			subtype;
 	int			weak_chg_icl_ua;
-	struct smblite_shim	*shim;
 
 	/* locks */
 	struct mutex		typec_lock;
@@ -389,8 +384,6 @@ struct smb_charger {
 	bool			uusb_apsd_rerun_done;
 	bool			dpdm_enabled;
 	bool			hvdcp3_detected;
-	bool			hvdcp3_detect_en;
-	bool			hvdcp3_negotiation_en;
 	bool			concurrent_mode_supported;
 	bool			concurrent_mode_status;
 	u8			float_cfg;
@@ -486,8 +479,6 @@ int smblite_lib_get_prop_usb_present(struct smb_charger *chg,
 				union power_supply_propval *val);
 int smblite_lib_get_prop_usb_online(struct smb_charger *chg,
 				union power_supply_propval *val);
-void smblite_lib_get_prop_usb_type(struct smb_charger *chg,
-				union power_supply_propval *val);
 int smblite_lib_get_usb_online(struct smb_charger *chg,
 				union power_supply_propval *val);
 int smblite_lib_get_prop_input_current_limited(struct smb_charger *chg,
@@ -506,8 +497,6 @@ int smblite_lib_get_prop_input_current_settled(struct smb_charger *chg,
 				int *val);
 int smblite_lib_get_prop_input_voltage_settled(struct smb_charger *chg,
 				int *val);
-int smblite_lib_get_prop_usbin_current(struct smb_charger *chg,
-				union power_supply_propval *val);
 int smblite_lib_get_prop_charger_temp(struct smb_charger *chg,
 				int *val);
 int smblite_lib_get_prop_die_health(struct smb_charger *chg);
@@ -551,12 +540,5 @@ int smblite_lib_set_concurrent_config(struct smb_charger *chg, bool enable);
 bool is_concurrent_mode_supported(struct smb_charger *chg);
 void smblite_lib_hvdcp_detect_enable(struct smb_charger *chg, bool enable);
 int smblite_lib_rerun_apsd_if_required(struct smb_charger *chg);
-void smblite_lib_rerun_apsd(struct smb_charger *chg);
-int smblite_lib_dm_pulse(struct smb_charger *chg);
-int smblite_lib_dp_pulse(struct smb_charger *chg);
-int smblite_lib_force_vbus_voltage(struct smb_charger *chg, u8 val);
-bool smblite_lib_is_boost_en(struct smb_charger *chg);
-irqreturn_t smblite_aicl_fail_irq_handler(int irq, void *data);
-bool smblite_lib_is_apsd_enabled(struct smb_charger *chg);
-int smblite_lib_enable_apsd(struct smb_charger *chg, bool enable);
+
 #endif /* __SMBLITE_LIB_H */

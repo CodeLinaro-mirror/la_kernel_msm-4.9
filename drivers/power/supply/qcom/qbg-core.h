@@ -9,9 +9,8 @@
 
 #define qbg_dbg(chip, reason, fmt, ...)			\
 	do {							\
-		if ((*chip->debug_mask & (reason))		\
-				|| (reason) == QBG_DEBUG_ALWAYS)\
-			pr_info(fmt, ##__VA_ARGS__);	\
+		if (*chip->debug_mask & (reason))		\
+			pr_err(fmt, ##__VA_ARGS__);	\
 		else						\
 			pr_debug(fmt, ##__VA_ARGS__);	\
 	} while (0)
@@ -23,7 +22,6 @@
 #define QBG_CONTEXT_LOCAL_BUF_SIZE	3072
 
 enum debug_mask {
-	QBG_DEBUG_ALWAYS	= 0,
 	QBG_DEBUG_BUS_READ	= BIT(0),
 	QBG_DEBUG_BUS_WRITE	= BIT(1),
 	QBG_DEBUG_SDAM		= BIT(2),
@@ -152,9 +150,6 @@ enum QBG_ACCUM_INTERVAL_TYPE {
  * @data_ready:		Flag to indicate QBG data is ready
  * @in_fast_char:	Flag to indicate QBG is in fast char mode
  * @enable_fifo_depth_half	Flag to indicate QBG fifo reduce half
- * @interrupt_stats_lock	Protects access to interrupt stats
- * @sdam_interrupt_count	Number of SDAM interrupts received since boot
- * @last_sdam_interrupt_time	Timestamp in seconds of last SDAM interrupt
  */
 struct qti_qbg {
 	struct device		*dev;
@@ -207,7 +202,6 @@ struct qti_qbg {
 	u32			max_fifo_count;
 	u32			batt_id_ohm;
 	u32			sdam_batt_id;
-	u32			batt_profile_id;
 	u32			essential_param_revid;
 	u32			sample_time_us[QBG_STATE_MAX];
 	u32			*debug_mask;
@@ -259,8 +253,5 @@ struct qti_qbg {
 	bool			data_ready;
 	bool			in_fast_char;
 	bool			enable_fifo_depth_half;
-	struct mutex		interrupt_stats_lock;
-	unsigned int		sdam_interrupt_count;
-	time64_t		last_sdam_interrupt_time;
 };
 #endif /* __QBG_CORE_H__ */
