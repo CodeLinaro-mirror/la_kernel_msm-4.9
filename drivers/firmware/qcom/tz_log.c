@@ -959,6 +959,15 @@ static int  tzdbgfs_init(struct platform_device *pdev)
 	}
 
 	for (i = 0; i < TZDBG_STATS_MAX; i++) {
+
+		/* Do not create hyp_general and hyp_log debugfs entry
+		 * if hyplog is not enabled via device tree.
+		 */
+
+		if ((!tzdbg.is_hyplog_enabled) &&
+		     ((i == TZDBG_HYP_GENERAL) || (i == TZDBG_HYP_LOG)))
+			continue;
+
 		tzdbg.debug_tz[i] = i;
 		dent = debugfs_create_file_unsafe(tzdbg.stat[i].name,
 				0444, dent_dir,
