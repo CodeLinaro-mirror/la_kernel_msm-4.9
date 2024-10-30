@@ -1392,7 +1392,6 @@ static int fastrpc_mmap_create(struct fastrpc_file *fl, int fd, struct dma_buf *
 	else
 		fl->mem_snap.nonheap_bufs_size += map->size;
 	spin_unlock(&fl->hlock);
-
 	if ((mflags != ADSP_MMAP_HEAP_ADDR) &&
 			(mflags != ADSP_MMAP_REMOTE_HEAP_ADDR))
 		fastrpc_mmap_add(map);
@@ -2392,12 +2391,10 @@ static int get_args(uint32_t kernel, struct smq_invoke_ctx *ctx)
 			err = fastrpc_mmap_create(ctx->fl, ctx->fds[i], NULL,
 					FASTRPC_ATTR_NOVA, 0, 0, dmaflags,
 					&ctx->maps[i]);
+		if (!err && ctx->maps[i])
+			ctx->maps[i]->dma_handle_refs++;
 		if (err) {
 			for (j = bufs; j < i; j++) {
-				/*
-				 * Due to error decrement  refs count before mmap free
-				 * for each in/out handle, if map created
-				 */
 				if (ctx->maps[j] && ctx->maps[j]->dma_handle_refs) {
 					ctx->maps[j]->dma_handle_refs--;
 					fastrpc_mmap_free(ctx->maps[j], 0);
@@ -2405,12 +2402,6 @@ static int get_args(uint32_t kernel, struct smq_invoke_ctx *ctx)
 			}
 			mutex_unlock(&ctx->fl->map_mutex);
 			goto bail;
-		} else if (ctx->maps[i]) {
-			/*
-			 * Increment  refs count for in/out handle if map created
-			 * and no error, indicate map under use in remote call
-			 */
-			ctx->maps[i]->dma_handle_refs++;
 		}
 		ipage += 1;
 	}
@@ -2578,7 +2569,7 @@ static int get_args(uint32_t kernel, struct smq_invoke_ctx *ctx)
 			} else {
 				/* map already freed by some other call */
 				mutex_unlock(&ctx->fl->map_mutex);
-				ADSPRPC_ERR("could not find map associated with dma hadle fd %d \n",
+				ADSPRPC_ERR("could not find map associated with dma handle fd %d\n",
 					ctx->fds[i]);
 				goto bail;
 			}
@@ -3025,6 +3016,7 @@ static void fastrpc_init(struct fastrpc_apps *me)
 	/* Set CDSP channel to non secure */
 	me->channel[CDSP_DOMAIN_ID].secure = NON_SECURE_CHANNEL;
 	me->channel[CDSP_DOMAIN_ID].unsigned_support = true;
+	me->channel[MDSP_DOMAIN_ID].unsigned_support = true;
 }
 
 static inline void fastrpc_pm_awake(struct fastrpc_file *fl, int channel_type)
@@ -3834,6 +3826,7 @@ static int fastrpc_init_create_dynamic_process(struct fastrpc_file *fl,
 	unsigned int gid = 0, one_mb = 1024*1024;
 	unsigned int dsp_userpd_memlen = 3 * one_mb;
 	struct fastrpc_buf *init_mem;
+	struct fastrpc_channel_ctx *chan = &gcinfo[fl->cid];
 
 	struct {
 		int pgid;
@@ -3878,6 +3871,14 @@ static int fastrpc_init_create_dynamic_process(struct fastrpc_file *fl,
 			goto bail;
 	}
 	inbuf.pageslen = 1;
+
+	/* Restrict Signed offload to DSP if unsigned offload is enabled except CDSP */
+	if (chan->unsigned_support && fl->cid != CDSP_DOMAIN_ID && !fl->is_unsigned_pd) {
+		err = -ECONNREFUSED;
+		ADSPRPC_ERR(
+			"Restrict signed offload for domain: %d\n", fl->cid);
+		goto bail;
+	}
 
 	/* Untrusted apps are not allowed to offload to signedPD on DSP. */
 	if (fl->untrusted_process) {
@@ -4404,10 +4405,6 @@ int fastrpc_get_info_from_dsp(struct fastrpc_file *fl,
 	remote_arg_t ra[2];
 
 	dsp_attr_buf[0] = 0;	// Capability filled in userspace
-
-	// Fastrpc to modem not supported
-	if (domain == MDSP_DOMAIN_ID)
-		goto bail;
 
 	err = fastrpc_channel_open(fl, FASTRPC_INIT_NO_CREATE);
 	if (err)
@@ -5044,7 +5041,6 @@ static int fastrpc_mmap_remove_ssr(struct fastrpc_file *fl, int locked)
 	do {
 		match = NULL;
 		spin_lock_irqsave(&me->hlock, irq_flags);
-
 		hlist_for_each_entry_safe(map, n, &me->maps, hn) {
 			if (!map->is_dumped && ((!fl && map->servloc_name) ||
 					(fl && map->servloc_name  && fl->servloc_name &&
@@ -8060,6 +8056,10 @@ static int fastrpc_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	int ret = 0;
 	uint32_t secure_domains = 0;
+	struct device_node *node;
+	struct smq_phy_page range;
+	size_t mem_size;
+	struct reserved_mem *rmem;
 
 	if (of_device_is_compatible(dev->of_node,
 					"qcom,msm-fastrpc-compute")) {
@@ -8116,8 +8116,36 @@ static int fastrpc_probe(struct platform_device *pdev)
 		me->dev[MDSP_DOMAIN_ID] = dev;
 		ret = of_reserved_mem_device_init_by_idx(dev, dev->of_node, 0);
 		if (ret) {
-			pr_err("adsprpc: Error: %s: initialization of memory region mdsp_mem failed with %d\n",
+			pr_warn("adsprpc: Error: %s: initialization of memory region mdsp_mem failed with %d\n",
 				__func__, ret);
+		}
+		range.addr = 0;
+		node = of_parse_phandle(dev->of_node, "memory-region", 0);
+		if (!node)
+			return -EINVAL;
+		rmem = of_reserved_mem_lookup(node);
+		of_node_put(node);
+		range.addr = rmem->base;
+		range.size = (unsigned long)rmem->size;
+		mem_size = range.size;
+
+		if (range.addr) {
+			int srcVM[1] = {VMID_HLOS};
+			int destVM[4] = {VMID_HLOS, VMID_MSS_MSA};
+			int destVMperm[4] = {PERM_READ | PERM_WRITE | PERM_EXEC,
+				PERM_READ | PERM_WRITE | PERM_EXEC};
+			int hyp_err = 0;
+
+			hyp_err = hyp_assign_phys(rmem->base, mem_size,
+						srcVM, 1, destVM, destVMperm, 2);
+			if (hyp_err) {
+				ADSPRPC_ERR(
+					"rh hyp assign failed with %d for phys 0x%llx, size %zu\n",
+					hyp_err, rmem->base, mem_size);
+				goto bail;
+			}
+			me->range.addr = range.addr;
+			me->range.size = range.size;
 		}
 	}
 

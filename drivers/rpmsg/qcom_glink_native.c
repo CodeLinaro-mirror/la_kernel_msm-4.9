@@ -2,7 +2,8 @@
 /*
  * Copyright (c) 2016-2017, Linaro Ltd
  * Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/idr.h>
@@ -79,7 +80,7 @@ do {									\
 
 static int should_wake;
 
-#if IS_ENABLED(CONFIG_DEEPSLEEP) && IS_ENABLED(CONFIG_RPMSG_QCOM_GLINK_RPM)
+#if IS_ENABLED(CONFIG_RPMSG_QCOM_GLINK_RPM)
 static int quickboot;
 atomic_t qb_comp;
 wait_queue_head_t quickboot_complete;
@@ -2197,8 +2198,7 @@ static int qcom_glink_rx_open(struct qcom_glink *glink, unsigned int rcid,
 		if (ret)
 			goto rcid_remove;
 
-#if IS_ENABLED(CONFIG_DEEPSLEEP) && IS_ENABLED(CONFIG_RPMSG_QCOM_GLINK_RPM) \
-	   && IS_ENABLED(CONFIG_MSM_RPM_SMD)
+#if IS_ENABLED(CONFIG_RPMSG_QCOM_GLINK_RPM) && IS_ENABLED(CONFIG_MSM_RPM_SMD)
 		ret = !strcmp(glink->name, "rpm-glink") &&
 				!strcmp(channel->name, "rpm_requests");
 		if (quickboot && ret) {
@@ -2449,7 +2449,7 @@ static void qcom_glink_set_affinity(struct qcom_glink *glink, u32 *arr,
 		dev_err(glink->dev, "failed to set task affinity\n");
 }
 
-#if IS_ENABLED(CONFIG_DEEPSLEEP) && IS_ENABLED(CONFIG_RPMSG_QCOM_GLINK_RPM)
+#if IS_ENABLED(CONFIG_RPMSG_QCOM_GLINK_RPM)
 void glink_rpm_ready_wait(void)
 {
 	int ret = 0;
@@ -2653,6 +2653,14 @@ void qcom_glink_native_unregister(struct qcom_glink *glink)
 }
 EXPORT_SYMBOL_GPL(qcom_glink_native_unregister);
 
+static int qcom_glink_freeze_no_irq(struct device *dev)
+{
+	should_wake = true;
+#if IS_ENABLED(CONFIG_RPMSG_QCOM_GLINK_RPM)
+	quickboot = 1;
+#endif
+	return 0;
+}
 static int qcom_glink_suspend_no_irq(struct device *dev)
 {
 	should_wake = true;
@@ -2660,7 +2668,6 @@ static int qcom_glink_suspend_no_irq(struct device *dev)
 	if (pm_suspend_via_firmware())
 		quickboot = 1;
 #endif
-
 	return 0;
 }
 
@@ -2673,6 +2680,7 @@ static int qcom_glink_resume_no_irq(struct device *dev)
 const struct dev_pm_ops glink_native_pm_ops = {
 	.suspend_noirq = qcom_glink_suspend_no_irq,
 	.resume_noirq = qcom_glink_resume_no_irq,
+	.freeze_noirq = qcom_glink_freeze_no_irq,
 };
 EXPORT_SYMBOL_GPL(glink_native_pm_ops);
 

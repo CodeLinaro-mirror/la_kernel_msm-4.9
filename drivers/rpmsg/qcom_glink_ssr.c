@@ -104,7 +104,7 @@ static int qcom_glink_ssr_callback(struct rpmsg_device *rpdev,
 	return 0;
 }
 
-#if IS_ENABLED(CONFIG_DEEPSLEEP) && IS_ENABLED(CONFIG_RPMSG_QCOM_GLINK_RPM)
+#if IS_ENABLED(CONFIG_RPMSG_QCOM_GLINK_RPM)
 void glink_ssr_notify_rpm(void)
 {
 	struct do_cleanup_msg msg;
@@ -125,7 +125,7 @@ void glink_ssr_notify_rpm(void)
 		pr_err("fail to send do cleanup to rpm for APSS SSR %d\n",
 					ret);
 }
-EXPORT_SYMBOL(glink_ssr_notify_rpm);
+EXPORT_SYMBOL_GPL(glink_ssr_notify_rpm);
 #endif
 
 static int qcom_glink_ssr_notifier_call(struct notifier_block *nb,
