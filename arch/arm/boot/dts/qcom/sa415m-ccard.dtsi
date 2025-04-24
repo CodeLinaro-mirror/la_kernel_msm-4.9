@@ -529,6 +529,7 @@
 };
 
 &pcie0 {
+	qcom,target-link-speed = <0x1>;
 	/delete-property/ qcom,l1-supported;
 	/delete-property/ qcom,l1ss-supported;
 	qcom,no-l1ss-supported;
