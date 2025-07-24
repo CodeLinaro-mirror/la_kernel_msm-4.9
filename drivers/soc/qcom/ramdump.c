@@ -201,13 +201,13 @@ static ssize_t ramdump_read(struct file *filep, char __user *buf, size_t count,
 
 	if (alignsize & 0x7) {
 		bytes_after = alignsize & 0x7;
-		memcpy(alignbuf, device_mem, alignsize - bytes_after);
+		memcpy_fromio(alignbuf, device_mem, alignsize - bytes_after);
 		device_mem += alignsize - bytes_after;
 		alignbuf += (alignsize - bytes_after);
 		alignsize = bytes_after;
 		memcpy_fromio(alignbuf, device_mem, alignsize);
 	} else
-		memcpy(alignbuf, device_mem, alignsize);
+		memcpy_fromio(alignbuf, device_mem, alignsize);
 
 	if (copy_to_user(buf, finalbuf, copy_size)) {
 		pr_err("Ramdump(%s): Couldn't copy all data to user.",
