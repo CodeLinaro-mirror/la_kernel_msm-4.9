@@ -156,11 +156,12 @@ static void qcom_mhi_ipc_router_ul_callback(struct mhi_device *mhi_dev,
 	unsigned long flags;
 
 	spin_lock_irqsave(&mhi_xprtp->ul_lock, flags);
-	pkt = list_first_entry(&mhi_xprtp->ul_pkts,
-		struct ipc_router_mhi_pkt, node);
-	list_del(&pkt->node);
-	complete_all(&pkt->done);
-
+	if (!list_empty(&mhi_xprtp->ul_pkts)) {
+		pkt = list_first_entry(&mhi_xprtp->ul_pkts,
+					struct ipc_router_mhi_pkt, node);
+		list_del(&pkt->node);
+		complete_all(&pkt->done);
+	}
 	spin_unlock_irqrestore(&mhi_xprtp->ul_lock, flags);
 }
 
