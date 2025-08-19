@@ -21,6 +21,7 @@
 #include <linux/completion.h>
 #include <soc/qcom/ramdump.h>
 #include <linux/cma.h>
+#include <linux/iommu.h>
 
 #include "main.h"
 #include "bus.h"
@@ -1408,12 +1409,24 @@ static int cnss_pci_smmu_fault_handler(struct iommu_domain *domain,
 				       int flags, void *handler_token)
 {
 	struct cnss_pci_data *pci_priv = handler_token;
+	int f_mask = IOMMU_FAULT_TRANSLATION | IOMMU_FAULT_READ;
 
-	cnss_pr_err("SMMU fault happened with IOVA 0x%lx\n", iova);
+	cnss_pr_err("SMMU fault happened with IOVA 0x%lx, flags: 0x%x\n",
+		    iova, flags);
 
 	if (!pci_priv) {
 		cnss_pr_err("pci_priv is NULL\n");
 		return -ENODEV;
+	}
+
+	switch (pci_priv->device_id) {
+	case QCN7605_DEVICE_ID:
+		/* return 0 if and only if [TF R ] is set */
+		if ((flags & f_mask) && !(flags & ~f_mask))
+			return 0;
+		break;
+	default:
+		break;
 	}
 
 	cnss_force_fw_assert(&pci_priv->pci_dev->dev);
