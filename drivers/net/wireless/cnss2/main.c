@@ -927,7 +927,10 @@ static void cnss_subsys_crash_shutdown(const struct subsys_desc *subsys_desc)
 		cnss_pr_err("plat_priv is NULL\n");
 		return;
 	}
-
+	if (!plat_priv->driver_state) {
+		cnss_pr_err("Not active, ignore");
+		return;
+	}
 	cnss_bus_dev_crash_shutdown(plat_priv);
 }
 
