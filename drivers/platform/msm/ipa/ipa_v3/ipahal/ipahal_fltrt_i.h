@@ -8,6 +8,8 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
+ *
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #ifndef _IPAHAL_FLTRT_I_H_
@@ -50,6 +52,7 @@ enum ipa_fltrt_equations {
 #define IPA3_0_HW_TBL_ADDR_MASK (127)
 #define IPA3_0_HW_RULE_BUF_SIZE (256)
 #define IPA3_0_HW_RULE_START_ALIGNMENT (7)
+#define IPA3_0_HW_RULE_PREFETCH_BUF_SIZE (128)
 
 
 /*

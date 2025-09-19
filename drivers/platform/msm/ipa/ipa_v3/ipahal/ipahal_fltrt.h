@@ -8,6 +8,8 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
+ *
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #ifndef _IPAHAL_FLTRT_H_
@@ -138,6 +140,9 @@ u32 ipahal_get_hw_tbl_hdr_width(void);
  * This function return the alignment of the offset that IPA expects
  */
 u32 ipahal_get_lcl_tbl_addr_alignment(void);
+
+/* Get the H/W (flt/rt) prefetch buf size */
+u32 ipahal_get_hw_prefetch_buf_size(void);
 
 /*
  * Rule priority is used to distinguish rules order
