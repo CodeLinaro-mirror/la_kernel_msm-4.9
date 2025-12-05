@@ -24,6 +24,7 @@
 #include <linux/elf.h>
 #include <linux/wait.h>
 #include <linux/cdev.h>
+#include <linux/srcu.h>
 #include <soc/qcom/ramdump.h>
 #include <linux/dma-mapping.h>
 #include <linux/of.h>
@@ -59,6 +60,8 @@ struct ramdump_device {
 	char *elfcore_buf;
 	unsigned long attrs;
 	bool complete_ramdump;
+	bool abort_ramdump;
+	struct srcu_struct rd_srcu;
 };
 
 static int ramdump_open(struct inode *inode, struct file *filep)
@@ -126,14 +129,25 @@ static ssize_t ramdump_read(struct file *filep, char __user *buf, size_t count,
 	size_t copy_size = 0, alignsize;
 	unsigned char *alignbuf = NULL, *finalbuf = NULL;
 	int ret = 0;
+	int srcu_idx;
 	loff_t orig_pos = *pos;
 
 	if ((filep->f_flags & O_NONBLOCK) && !rd_dev->data_ready)
 		return -EAGAIN;
 
-	ret = wait_event_interruptible(rd_dev->dump_wait_q, rd_dev->data_ready);
+	ret = wait_event_interruptible(rd_dev->dump_wait_q,
+				rd_dev->data_ready || rd_dev->abort_ramdump);
 	if (ret)
 		return ret;
+
+	/* Protect the mapping and read window from teardown via SRCU */
+	srcu_idx = srcu_read_lock(&rd_dev->rd_srcu);
+	if (rd_dev->abort_ramdump) {
+		pr_err("Ramdump(%s): Ramdump aborted\n", rd_dev->name);
+		rd_dev->ramdump_status = -1;
+		ret = -ETIME;
+		goto ramdump_done;
+	}
 
 	if (*pos < rd_dev->elfcore_size) {
 		copy_size = rd_dev->elfcore_size - *pos;
@@ -146,8 +160,12 @@ static ssize_t ramdump_read(struct file *filep, char __user *buf, size_t count,
 		*pos += copy_size;
 		count -= copy_size;
 		buf += copy_size;
-		if (count == 0)
+
+		if (count == 0) {
+			/* End after ELF; release SRCU and return */
+			srcu_read_unlock(&rd_dev->rd_srcu, srcu_idx);
 			return copy_size;
+		}
 	}
 
 	addr = offset_translate(*pos - rd_dev->elfcore_size, rd_dev,
@@ -226,11 +244,16 @@ static ssize_t ramdump_read(struct file *filep, char __user *buf, size_t count,
 	pr_debug("Ramdump(%s): Read %zd bytes from address %lx.",
 			rd_dev->name, copy_size, addr);
 
+	/* Normal completion: release SRCU before returning */
+	srcu_read_unlock(&rd_dev->rd_srcu, srcu_idx);
 	return *pos - orig_pos;
 
 ramdump_done:
 	if (!vaddr && origdevice_mem)
 		dma_unremap(rd_dev->dev->parent, origdevice_mem, copy_size);
+
+	/* Error/abort path: ensure SRCU is released */
+	srcu_read_unlock(&rd_dev->rd_srcu, srcu_idx);
 
 	kfree(finalbuf);
 	rd_dev->data_ready = 0;
@@ -335,6 +358,7 @@ void *create_ramdump_device(const char *dev_name, struct device *parent)
 				dev_name, ret);
 		goto fail_return_minor;
 	}
+	init_srcu_struct(&rd_dev->rd_srcu);
 
 	cdev_init(&rd_dev->cdev, &ramdump_file_ops);
 
@@ -349,6 +373,7 @@ void *create_ramdump_device(const char *dev_name, struct device *parent)
 
 fail_cdev_add:
 	device_unregister(rd_dev->dev);
+	cleanup_srcu_struct(&rd_dev->rd_srcu);
 fail_return_minor:
 	ida_simple_remove(&rd_minor_id, minor);
 fail_out_of_minors:
@@ -367,6 +392,7 @@ void destroy_ramdump_device(void *dev)
 
 	cdev_del(&rd_dev->cdev);
 	device_unregister(rd_dev->dev);
+	cleanup_srcu_struct(&rd_dev->rd_srcu);
 	ida_simple_remove(&rd_minor_id, minor);
 	kfree(rd_dev);
 }
@@ -429,6 +455,7 @@ static int _do_ramdump(void *handle, struct ramdump_segment *segments,
 
 	rd_dev->data_ready = 1;
 	rd_dev->ramdump_status = -1;
+	rd_dev->abort_ramdump = false;
 
 	reinit_completion(&rd_dev->ramdump_complete);
 
@@ -443,6 +470,12 @@ static int _do_ramdump(void *handle, struct ramdump_segment *segments,
 		pr_err("Ramdump(%s): Timed out waiting for userspace.\n",
 			rd_dev->name);
 		ret = -EPIPE;
+		rd_dev->abort_ramdump = true;
+		/*
+		 * Ensure all in-flight readers (SRCU read-side) have finished
+		 * before PIL or producer proceeds to unmap/teardown.
+		 */
+		synchronize_srcu(&rd_dev->rd_srcu);
 	} else
 		ret = (rd_dev->ramdump_status == 0) ? 0 : -EPIPE;
 
