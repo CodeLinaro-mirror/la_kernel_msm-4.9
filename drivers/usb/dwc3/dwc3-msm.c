@@ -4202,7 +4202,10 @@ static void msm_dwc3_perf_vote_work(struct work_struct *w)
 		 __func__, in_perf_mode, (dwc->irq_cnt - last_irq_cnt));
 
 	last_irq_cnt = dwc->irq_cnt;
-	msm_dwc3_perf_vote_update(mdwc, in_perf_mode);
+
+	if (pm_qos_request_active(&mdwc->pm_qos_req_dma))
+		msm_dwc3_perf_vote_update(mdwc, in_perf_mode);
+
 	schedule_delayed_work(&mdwc->perf_vote_work,
 			msecs_to_jiffies(1000 * PM_QOS_SAMPLE_SEC));
 }
