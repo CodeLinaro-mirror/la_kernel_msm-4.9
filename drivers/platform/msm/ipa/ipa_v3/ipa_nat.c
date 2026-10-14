@@ -877,6 +877,13 @@ int ipa3_nat_init_cmd(struct ipa_ioc_v4_nat_init *init)
 		return -EPERM;
 	}
 
+	if (init->expn_table_entries == U16_MAX) {
+		IPAERR_RL("Expn table entries is %u\n",
+			init->expn_table_entries);
+	        mutex_unlock(&ipa3_ctx->nat_mem.dev.lock);
+	        return -EPERM;
+	}
+
 	result = ipa3_nat_ipv6ct_check_table_params(
 		&ipa3_ctx->nat_mem.dev,
 		init->ipv4_rules_offset,
@@ -1014,9 +1021,16 @@ int ipa3_ipv6ct_init_cmd(struct ipa_ioc_ipv6ct_init *init)
 		return -EPERM;
 	}
 
-	if (init->table_entries == 0) {
-		IPAERR_RL("Table entries is zero\n");
+        if (init->table_entries == 0 ||
+		init->table_entries == U16_MAX) {
+		IPAERR_RL("Table entries is %u\n", init->table_entries);
 		return -EPERM;
+	}
+
+	if (init->expn_table_entries == U16_MAX) {
+		IPAERR_RL("Expn table entries is %u\n",
+			init->expn_table_entries);
+	        return -EPERM;
 	}
 
 	result = ipa3_nat_ipv6ct_check_table_params(
