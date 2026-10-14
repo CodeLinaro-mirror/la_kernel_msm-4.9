@@ -870,8 +870,9 @@ int ipa3_nat_init_cmd(struct ipa_ioc_v4_nat_init *init)
 		return -EPERM;
 	}
 
-	if (init->table_entries == 0) {
-		IPAERR_RL("Table entries is zero\n");
+	if (init->table_entries == 0 ||
+		init->table_entries == U16_MAX) {
+		IPAERR_RL("Table entries is %d\n", init->table_entries);
 		mutex_unlock(&ipa3_ctx->nat_mem.dev.lock);
 		return -EPERM;
 	}
